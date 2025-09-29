@@ -1,0 +1,169 @@
+{
+  "name": "Project Ares - Phase 1 - Simple Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://analytics-service:8080/api/applications",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{$json}}"
+      },
+      "name": "Log 'NOTIFIED'",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        624,
+        -48
+      ],
+      "id": "c989e58d-1c98-4862-9b5e-2c78a0c5b9af"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://webhook.site/9df60bf9-f426-4939-b443-1f1350d4bc24",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{$json}}"
+      },
+      "name": "Send Simple Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -48
+      ],
+      "id": "0760af0f-cd1b-4988-abf5-d82716cd0549"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -272,
+        -48
+      ],
+      "id": "2cb38736-874e-46f5-929d-1f6b2483a2cf",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://www.foundit.in/search/android-intern-jobs-in-gurgaon-gurugram",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -48,
+        -48
+      ],
+      "id": "3a3900ef-212f-47b8-a172-e2c5df01d4f0",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the HTML content from the previous node\nconst html = $input.all()[0].json.data;\n\nconst scriptRegex = /<script type=\"application\\/ld\\+json\">([\\s\\S]*?)<\\/script>/;\nconst match = html.match(scriptRegex);\n\nif (match && match[1]) {\n  try {\n    // The content of the script tag is what we need to parse\n    const jsonData = JSON.parse(match[1]);\n\n    // Check if it's the ItemList we're looking for\n    if (jsonData['@type'] === 'ItemList' && jsonData.itemListElement) {\n      // Return the array of jobs\n      return jsonData.itemListElement.map(item => ({\n        json: {\n          jobTitle: item.name,\n          url: item.url,\n          image: item.image\n        }\n      }));\n    }\n  } catch (e) {\n    // In case of a parsing error, return an empty array and log the error.\n    console.error(\"Failed to parse the ItemList JSON-LD data: \" + e.message);\n    return [];\n  }\n}\n\n// If no data is found, return an empty array\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -48
+      ],
+      "id": "ea137f1d-4e2c-41eb-9e47-162f3a670cf1",
+      "name": "Code in JavaScript",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const json = item.json;\n  const url = json.url;\n\n  // Extract Job ID from the end of the URL\n  const jobIdMatch = url.match(/(\\d+)$/);\n  const jobId = jobIdMatch ? jobIdMatch[1] : null;\n\n  // Extract a slug from the URL for company name extraction\n  const urlParts = url.split('/');\n  const slug = urlParts[urlParts.length - 1];\n\n  // Attempt to extract company name from the slug.\n  let companyName = '';\n  if (slug.includes('walmart')) {\n    companyName = 'Walmart Global Tech India';\n  } else if (slug.includes('microsoft')) {\n    companyName = 'Microsoft India';\n  } else if (slug.includes('capgemini')) {\n    companyName = 'Capgemini';\n  } else if (slug.includes('hsbc')) {\n    companyName = 'HSBC';\n  }\n\n  // Construct the dossier object with camelCase keys\n  const dossierObject = {\n    jobDescriptionUrl: url\n  };\n\n  // Return the final JSON with camelCase keys and a stringified dossier\n  return {\n    json: {\n      jobId: 'foundit_' + jobId,\n      jobTitle: json.jobTitle,\n      companyName: companyName,\n      source: 'foundit.in',\n      status: 'NOTIFIED',\n      dossier: JSON.stringify(dossierObject)\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -48
+      ],
+      "id": "9c061ba8-f5b0-457b-891f-2cbb60d867e0",
+      "name": "Code in JavaScript1",
+      "alwaysOutputData": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Log 'NOTIFIED'": {
+      "main": [
+        [
+          {
+            "node": "Send Simple Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Log 'NOTIFIED'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "621908ff-f283-4f9a-92cb-4999c10f2324",
+  "meta": {
+    "instanceId": "5a1bc7bdbda79678da2361de6bc7c91cd90d534cd561a00733a95bb182b8c298"
+  },
+  "id": "IjF3poKKLcDvNq5S",
+  "tags": []
+}
