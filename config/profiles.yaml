@@ -1,5 +1,10 @@
 # config/profiles.yaml
 # Order is critical. Most specific profiles first.
+- profile_name: "Tier-2 Well-Funded Startups & Unicorns"
+  sources: ["wellfound.com", "ycombinator.com/jobs"]
+  exclude_roles: ["Intern", "Junior", "Frontend"]
+  action: "full_auto_apply"
+  
 - profile_name: "Tier-4 Local Market Watch"
   locations: ["Bhubaneswar", "Pune"]
   roles: ["Software Engineer", "Backend Developer"]
