@@ -19,7 +19,8 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - GENERIC_TIMEZONE=Asia/Kolkata 
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - NODE_FUNCTION_ALLOW_EXTERNAL=js-yaml 
     volumes:
       - ./n8n_data:/home/node/.n8n
       - ./config:/home/node/config 
@@ -47,5 +48,14 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+
+  ai-service:
+    container_name: ares-ai
+    build:
+      context: ./ai-service # Points to the Python app directory
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+
 volumes:
   postgres_data:

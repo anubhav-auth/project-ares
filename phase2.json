@@ -1,0 +1,347 @@
+{
+  "name": "Project Ares - Main Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "value": 4
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -260,
+        180
+      ],
+      "id": "2cb38736-874e-46f5-929d-1f6b2483a2cf"
+    },
+    {
+      "parameters": {
+        "url": "https://www.foundit.in/search/software-engineer-jobs-in-pune",
+        "options": {}
+      },
+      "name": "1. Scrape Job Board",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -40,
+        180
+      ],
+      "id": "3a3900ef-212f-47b8-a172-e2c5df01d4f0"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.all()[0].json.data;\nconst scriptRegex = /<script type=\\\"application\\/ld\\+json\\\">([\\s\\S]*?)<\\/script>/;\nconst match = html.match(scriptRegex);\nif (match && match[1]) {\n  try {\n    const jsonData = JSON.parse(match[1]);\n    if (jsonData['@type'] === 'ItemList' && jsonData.itemListElement) {\n      return jsonData.itemListElement.map(item => ({\n        json: {\n          jobTitle: item.name,\n          location: item.jobLocation?.address?.addressLocality,\n          jobDescriptionText: item.description,\n          url: item.url,\n          image: item.image,\n          companyName: item.hiringOrganization?.name\n        }\n      }));\n    }\n  } catch (e) {\n    return [];\n  }\n}\nreturn [];"
+      },
+      "name": "2. Parse HTML for Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        180,
+        180
+      ],
+      "id": "ea137f1d-4e2c-41eb-9e47-162f3a670cf1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const json = $json;\nconst url = json.url;\nconst jobIdMatch = url.match(/(\\d+)$/);\nconst jobId = jobIdMatch ? jobIdMatch[1] : null;\n\nreturn {\n  jobId: 'foundit_' + jobId,\n  jobTitle: json.jobTitle,\n  companyName: json.companyName,\n  source: 'foundit.in',\n  status: 'NOTIFIED',\n  dossier: JSON.stringify({ jobDescriptionUrl: url, location: json.location, jobDescriptionText: json.jobDescriptionText })\n};"
+      },
+      "name": "3. Standardize Job JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        180
+      ],
+      "id": "9c061ba8-f5b0-457b-891f-2cbb60d867e0"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://analytics-service:8080/api/applications",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{$json}}"
+      },
+      "name": "4. Log 'NOTIFIED' to DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        180
+      ],
+      "id": "c989e58d-1c98-4862-9b5e-2c78a0c5b9af"
+    },
+    {
+      "parameters": {
+        "filePath": "/home/node/config/profiles.yaml"
+      },
+      "name": "5a. Read Profiles.yaml",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        840,
+        -20
+      ],
+      "id": "f9e3d3b7-f0a9-4b6e-a2c3-4c9f1d0a5b8f"
+    },
+    {
+      "parameters": {
+        "jsCode": "const yaml = require('js-yaml');\n\n// The job data is the input from the previous step\nconst job = $input.all('main', 0)[0].json;\n\n// The YAML file content is from the 'Read Profiles' step\nconst profilesYaml = $input.all('main', 1)[0].json.data;\nconst profiles = yaml.load(profilesYaml);\n\nlet action = 'simple_alert'; // Default action\n\nfor (const profile of profiles) {\n  let match = true;\n  \n  if (profile.locations) {\n    const jobLocation = JSON.parse(job.dossier).location || '';\n    if (!profile.locations.some(loc => jobLocation.toLowerCase().includes(loc.toLowerCase()))) {\n      match = false;\n    }\n  }\n\n  if (match && profile.roles) {\n     if (!profile.roles.some(role => job.jobTitle.toLowerCase().includes(role.toLowerCase()))) {\n      match = false;\n    }\n  }\n\n  if (match && profile.sources) {\n     if (!profile.sources.some(src => job.source.toLowerCase().includes(src.toLowerCase()))) {\n      match = false;\n    }\n  }\n\n  if (match && profile.exclude_roles) {\n     if (profile.exclude_roles.some(role => job.jobTitle.toLowerCase().includes(role.toLowerCase()))) {\n      match = false;\n    }\n  }\n\n  if (match) {\n    action = profile.action;\n    break; // Exit after first match\n  }\n}\n\n// Attach the determined action to the job data\njob.action = action;\nreturn job;\n"
+      },
+      "name": "5b. Triage Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        180
+      ],
+      "id": "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.action}}",
+              "operation": "equal",
+              "value2": "full_auto_apply"
+            }
+          ]
+        }
+      },
+      "name": "6. Route by Action",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1260,
+        180
+      ],
+      "id": "b1c2d3e4-f5a6-b7c8-d9e0-f1a2b3c4d5e6"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://webhook.site/9df60bf9-f426-4939-b443-1f1350d4bc24",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{$json}}"
+      },
+      "name": "Send 'Simple Alert'",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1480,
+        280
+      ],
+      "id": "0760af0f-cd1b-4988-abf5-d82716cd0549"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://ai-service:8001/api/generate-standard-coverletter",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={\n  \"job_details\": {\n    \"job_title\": \"{{$json.jobTitle}}\",\n    \"company_name\": \"{{$json.companyName}}\",\n    \"job_description_text\": \"{{JSON.parse($json.dossier).jobDescriptionText}}\"\n  },\n  \"user_profile\": {\n    \"name\": \"Ares Applicant\",\n    \"skills\": [\"Java\", \"Spring Boot\", \"PostgreSQL\", \"Docker\", \"Python\"],\n    \"experience_years\": 5\n  }\n}"
+      },
+      "name": "7a. Generate Cover Letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1480,
+        80
+      ],
+      "id": "c1d2e3f4-a5b6-c7d8-e9f0-a1b2c3d4e5f6"
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobData = $input.all('main', 0)[0].json;\nconst coverLetterData = $input.all('main', 1)[0].json;\n\nconst applicationUrl = JSON.parse(jobData.dossier).jobDescriptionUrl;\n\n// Basic payload for the automation service\n// In a real scenario, you'd map more fields from your user profile\nconst payload = {\n  application_url: applicationUrl,\n  job_id: jobData.jobId,\n  answers: {\n    \"name\": \"Ares Applicant\",\n    \"email\": \"applicant@project-ares.dev\",\n    \"cover_letter\": coverLetterData.cover_letter\n  }\n};\n\n// Pass along the database ID for the final update step\npayload.db_id = jobData.id;\n\nreturn payload;"
+      },
+      "name": "7b. Prepare Apply Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        80
+      ],
+      "id": "d1e2f3a4-b5c6-d7e8-f9a0-b1c2d3e4f5a6"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "http://automation-service:8000/apply/submit",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{$json}}"
+      },
+      "name": "7c. Submit Application",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        80
+      ],
+      "id": "e1f2a3b4-c5d6-e7f8-a9b0-c1d2e3f4a5b6"
+    },
+    {
+      "parameters": {
+        "requestMethod": "PUT",
+        "url": "=http://analytics-service:8080/api/applications/{{$json.db_id}}",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "{\n\t\"status\": \"APPLIED\"\n}"
+      },
+      "name": "7d. Update DB to 'APPLIED'",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2140,
+        80
+      ],
+      "id": "f1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c6"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "1. Scrape Job Board",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Scrape Job Board": {
+      "main": [
+        [
+          {
+            "node": "2. Parse HTML for Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Parse HTML for Jobs": {
+      "main": [
+        [
+          {
+            "node": "3. Standardize Job JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Standardize Job JSON": {
+      "main": [
+        [
+          {
+            "node": "4. Log 'NOTIFIED' to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Log 'NOTIFIED' to DB": {
+      "main": [
+        [
+          {
+            "node": "5b. Triage Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5a. Read Profiles.yaml": {
+      "main": [
+        [
+          {
+            "node": "5b. Triage Job",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "5b. Triage Job": {
+      "main": [
+        [
+          {
+            "node": "6. Route by Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Route by Action": {
+      "main": [
+        [
+          {
+            "node": "7a. Generate Cover Letter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send 'Simple Alert'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7a. Generate Cover Letter": {
+      "main": [
+        [
+          {
+            "node": "7b. Prepare Apply Payload",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "7b. Prepare Apply Payload": {
+      "main": [
+        [
+          {
+            "node": "7c. Submit Application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7c. Submit Application": {
+      "main": [
+        [
+          {
+            "node": "7d. Update DB to 'APPLIED'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "f1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c6",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

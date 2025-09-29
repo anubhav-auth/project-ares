@@ -1,11 +1,21 @@
-# config/profiles.yaml
+# config/profiles.yaml (Updated for better matching)
 # Order is critical. Most specific profiles first.
-- profile_name: "Tier-2 Well-Funded Startups & Unicorns"
-  sources: ["wellfound.com", "ycombinator.com/jobs"]
-  exclude_roles: ["Intern", "Junior", "Frontend"]
+
+- profile_name: "Tier-1 Top Tech Companies"
+  # This will match specific high-priority companies
+  companies: ["Walmart Global Tech India", "Microsoft India", "Uber"]
+  exclude_roles: ["Intern", "Junior"]
   action: "full_auto_apply"
-  
+
+- profile_name: "Tier-2 General Tech Roles"
+  # This is a broader rule that catches most other software jobs
+  sources: ["foundit.in"]
+  roles: ["Software Engineer", "Developer", "Automation Engineer"]
+  exclude_roles: ["Intern", "Junior", "Frontend", "SAP"]
+  action: "full_auto_apply"
+
 - profile_name: "Tier-4 Local Market Watch"
+  # This rule will now only be checked if the ones above don't match
   locations: ["Bhubaneswar", "Pune"]
-  roles: ["Software Engineer", "Backend Developer"]
+  roles: ["Software Engineer", "Backend Developer", "DevOps"]
   action: "simple_alert"

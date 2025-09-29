@@ -1,0 +1,3 @@
+fastapi
+uvicorn[standard]
+# Add other AI/LLM related libraries here, e.g., langchain, openai
