@@ -19,17 +19,17 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - GENERIC_TIMEZONE=Asia/Kolkata # Set your timezone
+      - GENERIC_TIMEZONE=Asia/Kolkata 
     volumes:
       - ./n8n_data:/home/node/.n8n
-      - ./config:/home/node/config # Mount config folder to access profiles.yaml
+      - ./config:/home/node/config 
     depends_on:
       - analytics-service
 
   analytics-service:
     container_name: ares-analytics
     build:
-      context: ./analytics-service # Points to the Spring Boot app directory
+      context: ./analytics-service 
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -40,5 +40,12 @@ services:
     depends_on:
       - postgres
 
+  automation-service:
+    container_name: ares-automation
+    build:
+      context: ./automation-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
 volumes:
   postgres_data:
