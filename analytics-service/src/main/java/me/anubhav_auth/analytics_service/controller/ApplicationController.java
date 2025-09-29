@@ -8,32 +8,23 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@RestController // Tells Spring this class defines REST API endpoints
-@RequestMapping("/api/applications") // Base URL for all endpoints in this class
+@RestController
+@RequestMapping("/api/applications")
 public class ApplicationController {
 
-    @Autowired // Asks Spring to give us an instance of the repository
+    @Autowired
     private ApplicationRepository applicationRepository;
 
-    /**
-     * Endpoint to create a new application record. [cite: 111]
-     */
     @PostMapping
     public Application createApplication(@RequestBody Application application) {
         return applicationRepository.save(application);
     }
 
-    /**
-     * Endpoint to get all stored application records. [cite: 114]
-     */
     @GetMapping
     public List<Application> getAllApplications() {
         return applicationRepository.findAll();
     }
 
-    /**
-     * Endpoint to update the status of an existing application. [cite: 113]
-     */
     @PutMapping("/{id}")
     public ResponseEntity<Application> updateApplicationStatus(
             @PathVariable Long id,
