@@ -1,0 +1,61 @@
+# ----------------------
+# Java / Maven
+# ----------------------
+target/
+*.jar
+*.war
+*.ear
+*.class
+*.log
+*.iml
+.mvn/wrapper/maven-wrapper.jar
+
+# Maven status and generated sources
+.mvn/
+!.mvn/wrapper/maven-wrapper.properties
+dependency-reduced-pom.xml
+
+# ----------------------
+# IDE / Editor
+# ----------------------
+.idea/
+*.iws
+*.ipr
+*.iml
+.vscode/
+*.swp
+*.swo
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# ----------------------
+# Docker / Compose
+# ----------------------
+*.pid
+*.seed
+*.pid.lock
+
+# ----------------------
+# n8n runtime data
+# ----------------------
+n8n_data/
+!n8n_data/nodes/package.json  # if you want to track custom nodes, else remove the !
+n8n_data/**/*.sqlite
+n8n_data/**/*.log
+
+# ----------------------
+# Database Volumes
+# ----------------------
+postgres_data/
+
+# ----------------------
+# Miscellaneous
+# ----------------------
+.env
+.env.local
+*.tmp
+*.out
+*.err
