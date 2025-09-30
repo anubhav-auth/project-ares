@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/applications")
@@ -174,6 +175,96 @@ public class ApplicationController {
         // No valid parameters provided
         response.put("error", "Please provide either jobId or both companyName and jobTitle");
         return ResponseEntity.badRequest().body(response);
+    }
+
+    @PostMapping("/check-duplicates-bulk")
+    public ResponseEntity<Map<String, Object>> checkDuplicatesBulk(
+            @RequestBody List<Map<String, String>> jobs) {
+
+        Map<String, Object> response = new HashMap<>();
+        List<Map<String, Object>> results = new ArrayList<>();
+
+        Instant cutoffTime = Instant.now().minus(48, ChronoUnit.HOURS);
+
+        for (Map<String, String> job : jobs) {
+            String jobId = job.get("jobId");
+            String companyName = job.get("companyName");
+            String jobTitle = job.get("jobTitle");
+
+            Map<String, Object> checkResult = new HashMap<>();
+            checkResult.put("jobId", jobId);
+
+            // Check by jobId first (most reliable)
+            if (jobId != null && applicationRepository.existsByJobId(jobId)) {
+                checkResult.put("isDuplicate", true);
+                checkResult.put("reason", "jobId");
+            }
+            // Then check by company + title
+            else if (companyName != null && jobTitle != null) {
+                boolean exists = applicationRepository
+                        .existsByCompanyNameAndJobTitleAndCreatedAtAfter(
+                                companyName, jobTitle, cutoffTime
+                        );
+                checkResult.put("isDuplicate", exists);
+                checkResult.put("reason", exists ? "companyAndTitle" : "unique");
+            } else {
+                checkResult.put("isDuplicate", false);
+                checkResult.put("reason", "insufficient_data");
+            }
+
+            results.add(checkResult);
+        }
+
+        long duplicateCount = results.stream()
+                .filter(r -> (Boolean) r.get("isDuplicate"))
+                .count();
+
+        response.put("results", results);
+        response.put("totalChecked", jobs.size());
+        response.put("duplicateCount", duplicateCount);
+        response.put("uniqueCount", jobs.size() - duplicateCount);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/standardize-and-save")
+    public ResponseEntity<Application> standardizeAndSave(@RequestBody Application application) {
+        // Standardize company name
+        if (application.getCompanyName() != null) {
+            application.setCompanyName(standardizeCompanyName(application.getCompanyName()));
+        }
+
+        // Check for duplicates after standardization
+        boolean isDuplicate = checkForDuplicate(
+                application.getJobId(),
+                application.getCompanyName(),
+                application.getJobTitle()
+        );
+
+        if (isDuplicate) {
+            Optional<Application> existing = applicationRepository.findByJobId(application.getJobId());
+            if (existing.isPresent()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(existing.get());
+            }
+        }
+
+        // Set default status
+        if (application.getStatus() == null) {
+            application.setStatus("NOTIFIED");
+        }
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(applicationRepository.save(application));
+    }
+
+    private String standardizeCompanyName(String name) {
+        // Remove common suffixes
+        name = name.replaceAll("(?i)\\s+(inc|llc|ltd|limited|corp|corporation|company|co)\\.*$", "");
+        // Normalize spacing
+        name = name.replaceAll("\\s+", " ").trim();
+        // Title case
+        return Arrays.stream(name.split(" "))
+                .map(word -> word.substring(0, 1).toUpperCase() + word.substring(1).toLowerCase())
+                .collect(Collectors.joining(" "));
     }
 
     @PostMapping("/check-duplicates-batch")
