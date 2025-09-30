@@ -1,17 +1,16 @@
 # ai-service/main.py
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Any, Optional, List
 import google.generativeai as genai
 import logging
-import redis
+import redis.asyncio as redis  # Use async redis
 import json
 import asyncio
-import os
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from contextlib import asynccontextmanager
 import time
 
@@ -25,15 +24,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configure Gemini
-if settings.gemini_api_key:
-    genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel(settings.ai_model)
-    logger.info(f"Gemini configured with model: {settings.ai_model}")
-else:
-    logger.error("No Gemini API key configured! Service will not function properly.")
+try:
+    if settings.gemini_api_key:
+        genai.configure(api_key=settings.gemini_api_key)
+        model = genai.GenerativeModel(settings.ai_model)
+        logger.info(f"Gemini configured with model: {settings.ai_model}")
+    else:
+        logger.warning("No Gemini API key configured. Service running in limited mode.")
+        model = None
+except Exception as e:
+    logger.error(f"Failed to configure Gemini: {e}")
     model = None
 
-# Configure Redis (optional - for caching)
+# Global Redis client (will be initialized in lifespan)
 redis_client = None
 try:
     redis_client = redis.Redis(
@@ -137,16 +140,36 @@ class AnswersRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle"""
+    """Manage application lifecycle with async Redis"""
+    global redis_client
+    
     logger.info(f"Starting AI service on port {settings.service_port}")
     logger.info(f"Debug mode: {settings.debug_mode}")
-    logger.info(f"Cache enabled: {settings.cache_enabled}")
+    logger.info(f"Test mode: {settings.test_mode}")
+    logger.info(f"Require Gemini: {settings.require_gemini}")
+    
+    # Initialize async Redis connection
+    if settings.cache_enabled:
+        try:
+            redis_client = redis.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True
+            )
+            await redis_client.ping()
+            logger.info("Redis connected successfully for caching")
+        except Exception as e:
+            logger.warning(f"Redis connection failed: {e} - Continuing without cache")
+            redis_client = None
+    else:
+        logger.info("Cache disabled by configuration")
     
     yield
     
+    # Shutdown
     logger.info("Shutting down AI service...")
     if redis_client:
-        redis_client.close()
+        await redis_client.close()
 
 # FastAPI App
 app = FastAPI(
@@ -209,7 +232,7 @@ async def track_requests(request: Request, call_next):
         raise
 
 class LLMService:
-    """Enhanced LLM service with better error handling and caching"""
+    """Enhanced LLM service with async Redis support"""
     
     @staticmethod
     def get_cache_key(prompt: str, prefix: str = "gemini") -> str:
@@ -224,23 +247,23 @@ class LLMService:
         cache_ttl: int = 3600,
         use_cache: bool = True
     ) -> str:
-        """Generate response with retry logic and caching"""
+        """Generate response with retry logic and async caching"""
         if not model:
+            if settings.test_mode:
+                # Return mock response in test mode
+                return "Mock response for testing - Gemini not configured"
             raise HTTPException(status_code=500, detail="Gemini API key not configured")
         
         max_retries = max_retries or settings.ai_max_retries
         
-        # Check cache if enabled
-        if use_cache and redis_client:
+        # Check cache if enabled (async Redis)
+        if use_cache and redis_client and settings.cache_enabled:
             cache_key = LLMService.get_cache_key(prompt)
             try:
-                cached = redis_client.get(cache_key)
+                cached = await redis_client.get(cache_key)
                 if cached:
                     logger.info("Cache hit for prompt")
-                    metrics["cache_hits"] += 1
                     return cached
-                else:
-                    metrics["cache_misses"] += 1
             except Exception as e:
                 logger.warning(f"Cache check failed: {e}")
         
@@ -262,10 +285,10 @@ class LLMService:
                 if not result or len(result) < 10:
                     raise ValueError("Response too short or empty")
                 
-                # Cache the response
-                if use_cache and redis_client and result:
+                # Cache the response (async)
+                if use_cache and redis_client and settings.cache_enabled and result:
                     try:
-                        redis_client.setex(cache_key, cache_ttl, result)
+                        await redis_client.setex(cache_key, cache_ttl, result)
                     except Exception as e:
                         logger.warning(f"Failed to cache response: {e}")
                 
@@ -310,15 +333,17 @@ async def root():
 async def health():
     """Health check endpoint"""
     health_status = {
-        "status": "healthy" if model else "unhealthy",
+        "status": "healthy" if (model or settings.test_mode) else "degraded",
         "gemini_configured": bool(model),
+        "test_mode": settings.test_mode,
         "redis_connected": redis_client is not None,
-        "timestamp": datetime.utcnow().isoformat(),
-        "uptime": time.time()  # Could calculate actual uptime
+        "cache_enabled": settings.cache_enabled,
+        "timestamp": datetime.utcnow().isoformat()
     }
     
-    if not model:
-        raise HTTPException(status_code=503, detail="Service unhealthy - Gemini not configured")
+    # Only fail health check if strict mode is enabled
+    if settings.require_gemini and not model:
+        raise HTTPException(status_code=503, detail="Service unhealthy - Gemini required but not configured")
     
     return health_status
 
