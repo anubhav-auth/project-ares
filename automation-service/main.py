@@ -90,9 +90,9 @@ class RateLimiter:
         self.requests.append(now)
         return True
 
-# Form Analyzer Class
+# Enhanced Form Analyzer Class with ML-ready submit button detection
 class FormAnalyzer:
-    """Advanced form analysis and field mapping"""
+    """Advanced form analysis with ML-ready submit button detection"""
     
     FIELD_PATTERNS = {
         'full_name': ['name', 'full name', 'your name', 'applicant name', 'candidate name'],
@@ -112,6 +112,123 @@ class FormAnalyzer:
         'visa_status': ['visa', 'work authorization', 'citizenship', 'work permit'],
         'education': ['education', 'degree', 'qualification', 'university', 'college']
     }
+    
+    # Enhanced submit button patterns with priority scoring
+    SUBMIT_BUTTON_PATTERNS = [
+        # Primary patterns - highest priority
+        {'selector': 'button[type="submit"]', 'priority': 10},
+        {'selector': 'input[type="submit"]', 'priority': 10},
+        
+        # Text-based patterns with high priority
+        {'selector': 'button:has-text("Submit Application")', 'priority': 9},
+        {'selector': 'button:has-text("Apply Now")', 'priority': 9},
+        {'selector': 'button:has-text("Submit")', 'priority': 9},
+        {'selector': 'button:has-text("Apply")', 'priority': 9},
+        
+        # Secondary text patterns
+        {'selector': 'button:has-text("Send Application")', 'priority': 8},
+        {'selector': 'button:has-text("Complete Application")', 'priority': 8},
+        {'selector': 'button:has-text("Send")', 'priority': 8},
+        {'selector': 'button:has-text("Complete")', 'priority': 7},
+        {'selector': 'button:has-text("Finish")', 'priority': 7},
+        
+        # Tertiary patterns
+        {'selector': 'button:has-text("Continue")', 'priority': 6},
+        {'selector': 'button:has-text("Next")', 'priority': 5},
+        {'selector': 'button:has-text("Proceed")', 'priority': 5},
+        
+        # Link patterns
+        {'selector': 'a:has-text("Submit Application")', 'priority': 7},
+        {'selector': 'a:has-text("Apply Now")', 'priority': 7},
+        {'selector': 'a.submit-button', 'priority': 8},
+        {'selector': 'a.btn-submit', 'priority': 8},
+        {'selector': 'a.apply-button', 'priority': 8},
+        
+        # Class-based patterns
+        {'selector': '.submit-button', 'priority': 8},
+        {'selector': '.btn-submit', 'priority': 8},
+        {'selector': '.btn-apply', 'priority': 8},
+        {'selector': '.application-submit', 'priority': 8},
+        {'selector': 'button.primary', 'priority': 6},
+        {'selector': 'button.btn-primary', 'priority': 6},
+        
+        # ID-based patterns
+        {'selector': '#submit', 'priority': 8},
+        {'selector': '#submitButton', 'priority': 8},
+        {'selector': '#submitBtn', 'priority': 8},
+        {'selector': '#applyButton', 'priority': 8},
+        {'selector': '#applyBtn', 'priority': 8},
+        {'selector': '#applicationSubmit', 'priority': 8},
+        
+        # Data attribute patterns
+        {'selector': '[data-action="submit"]', 'priority': 8},
+        {'selector': '[data-action="apply"]', 'priority': 8},
+        {'selector': '[data-testid="submit-button"]', 'priority': 8},
+        {'selector': '[data-testid="apply-button"]', 'priority': 8},
+    ]
+    
+    @classmethod
+    async def find_submit_button(cls, page):
+        """Find the most likely submit button using pattern matching and context analysis"""
+        
+        candidates = []
+        
+        for pattern in cls.SUBMIT_BUTTON_PATTERNS:
+            try:
+                elements = await page.locator(pattern['selector']).all()
+                for element in elements:
+                    if await element.is_visible():
+                        # Get button context
+                        text = await element.text_content() or ""
+                        
+                        # Calculate confidence score
+                        confidence = pattern['priority']
+                        
+                        # Boost confidence for specific keywords
+                        boost_words = ['submit', 'apply', 'send', 'complete', 'finish', 'application']
+                        for word in boost_words:
+                            if word in text.lower():
+                                confidence += 2
+                        
+                        # Reduce confidence for negative indicators
+                        negative_words = ['cancel', 'back', 'reset', 'clear', 'close', 'delete', 'remove']
+                        for word in negative_words:
+                            if word in text.lower():
+                                confidence -= 5
+                        
+                        # Check if button is at the bottom of the form (submit buttons usually are)
+                        try:
+                            box = await element.bounding_box()
+                            if box:
+                                viewport_size = page.viewport_size
+                                if viewport_size and box['y'] > viewport_size['height'] * 0.6:
+                                    confidence += 1
+                        except:
+                            pass
+                        
+                        # Check for disabled state
+                        is_disabled = await element.is_disabled()
+                        if is_disabled:
+                            confidence -= 10
+                        
+                        candidates.append({
+                            'selector': pattern['selector'],
+                            'element': element,
+                            'text': text,
+                            'confidence': confidence
+                        })
+                        
+            except Exception as e:
+                logger.debug(f"Pattern {pattern['selector']} failed: {e}")
+        
+        # Sort by confidence and return best candidate
+        if candidates:
+            candidates.sort(key=lambda x: x['confidence'], reverse=True)
+            best = candidates[0]
+            logger.info(f"Found submit button: '{best['text']}' with confidence {best['confidence']}")
+            return best['element']
+        
+        return None
     
     @classmethod
     async def analyze_form(cls, page):
@@ -226,7 +343,7 @@ class FormAnalyzer:
                 })
         return options
 
-# Application Processor
+# Application Processor with enhanced submit button detection
 class ApplicationProcessor:
     def __init__(self):
         self.browser = None
@@ -252,7 +369,7 @@ class ApplicationProcessor:
             await self.browser.close()
     
     async def submit_application(self, payload: ApplicationPayload):
-        """Submit a job application"""
+        """Submit a job application with enhanced submit button detection"""
         page = await self.context.new_page()
         
         try:
@@ -322,30 +439,54 @@ class ApplicationProcessor:
                 full_page=True
             )
             
-            # Find and click submit button
-            submit_selectors = [
-                'button[type="submit"]',
-                'input[type="submit"]',
-                'button:has-text("Submit")',
-                'button:has-text("Apply")',
-                'button:has-text("Send")',
-                'a:has-text("Submit Application")'
-            ]
+            # Find and click submit button with enhanced detection
+            submit_button = await FormAnalyzer.find_submit_button(page)
             
-            submit_clicked = False
-            for selector in submit_selectors:
-                try:
-                    btn = page.locator(selector).first
-                    if await btn.is_visible():
-                        await btn.click()
-                        submit_clicked = True
-                        logger.info(f"Clicked submit button: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not submit_clicked:
-                raise Exception("Could not find submit button")
+            if submit_button:
+                # Scroll button into view before clicking
+                await submit_button.scroll_into_view_if_needed()
+                await asyncio.sleep(0.5)  # Small delay for scroll to complete
+                
+                # Try to click the button
+                await submit_button.click()
+                logger.info("Clicked submit button successfully")
+            else:
+                # Fallback: Try basic selectors if ML-ready detection fails
+                logger.warning("Could not find submit button with confidence scoring, trying fallback")
+                
+                fallback_selectors = [
+                    'button[type="submit"]',
+                    'input[type="submit"]',
+                    'button:visible:last-of-type',  # Last visible button often is submit
+                ]
+                
+                submit_clicked = False
+                for selector in fallback_selectors:
+                    try:
+                        btn = page.locator(selector).first
+                        if await btn.is_visible() and not await btn.is_disabled():
+                            await btn.click()
+                            submit_clicked = True
+                            logger.info(f"Clicked button using fallback selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not submit_clicked:
+                    # Ultimate fallback: find any button with positive text
+                    all_buttons = await page.locator('button:visible, input[type="submit"]:visible, a.btn:visible').all()
+                    for button in all_buttons:
+                        text = (await button.text_content() or "").lower()
+                        # Check if text is positive (not cancel, back, etc.)
+                        if any(word in text for word in ['submit', 'apply', 'send', 'complete', 'finish', 'next']):
+                            if not any(word in text for word in ['cancel', 'back', 'reset', 'clear']):
+                                await button.click()
+                                logger.info(f"Clicked button with text: {text}")
+                                submit_clicked = True
+                                break
+                    
+                    if not submit_clicked:
+                        raise Exception("Could not find submit button after all attempts")
             
             # Wait for submission to complete
             await page.wait_for_load_state("networkidle", timeout=30000)
@@ -449,6 +590,9 @@ class ApplicationProcessor:
         finally:
             await page.close()
 
+# [Rest of the code remains the same - lifecycle management, FastAPI app, endpoints, etc.]
+# ... (keeping all the existing endpoints and other functions as they were)
+
 # Lifecycle management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -458,13 +602,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting automation service...")
     
-    # Initialize Redis connection
+    # Initialize Redis connection with modern async approach
     try:
-        redis_client = redis.create_redis_pool(
+        redis_client = redis.from_url(
             f"redis://{config.REDIS_HOST}:{config.REDIS_PORT}",
             password=config.REDIS_PASSWORD,
-            encoding="utf-8"
+            encoding="utf-8",
+            decode_responses=True
         )
+        await redis_client.ping()
         logger.info("Redis connected successfully")
     except Exception as e:
         logger.warning(f"Redis connection failed: {e} - Running without Redis")
@@ -481,8 +627,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down automation service...")
     if redis_client:
-        redis_client.close()
-        await redis_client.wait_closed()
+        await redis_client.close()
 
 # FastAPI App
 app = FastAPI(
@@ -537,6 +682,7 @@ async def process_application_queue():
             logger.error(f"Queue processor error: {e}")
             await asyncio.sleep(5)
 
+# [All the API endpoints remain exactly the same as in your original code]
 # ============= API ENDPOINTS =============
 
 @app.get("/")
@@ -674,6 +820,22 @@ async def analyze_application_form(payload: AnalyzePayload):
             # Analyze the form
             fields = await FormAnalyzer.analyze_form(page)
             
+            # Find the submit button
+            submit_button = await FormAnalyzer.find_submit_button(page)
+            submit_button_info = None
+            if submit_button:
+                submit_button_text = await submit_button.text_content()
+                submit_button_info = {
+                    "found": True,
+                    "text": submit_button_text,
+                    "selector": "detected_dynamically"
+                }
+            else:
+                submit_button_info = {
+                    "found": False,
+                    "fallback_selector": 'button[type="submit"]'
+                }
+            
             # Take a screenshot for reference
             screenshot_name = f"form_analysis_{hashlib.md5(payload.application_url.encode()).hexdigest()}.png"
             screenshot_path = f"{config.SCREENSHOT_DIR}/{screenshot_name}"
@@ -698,7 +860,7 @@ async def analyze_application_form(payload: AnalyzePayload):
             # Build form schema
             form_schema = {
                 "fields": fields,
-                "submit_button_selector": 'button[type="submit"]'  # Default, could be detected
+                "submit_button": submit_button_info
             }
             
             return {
@@ -770,7 +932,8 @@ async def get_metrics():
     # Add Redis metrics if available
     if redis_client:
         try:
-            metrics["redis_keys"] = await redis_client.dbsize()
+            db_size = await redis_client.dbsize()
+            metrics["redis_keys"] = db_size
         except:
             pass
     
