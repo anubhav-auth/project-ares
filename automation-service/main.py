@@ -273,13 +273,17 @@ class ApplicationProcessor:
             # Fill form fields
             filled_fields = []
             for field in fields:
+                value = None
+                
+                # Try to find matching value in answers
                 if field['classification'] in payload.answers:
                     value = payload.answers[field['classification']]
                 elif field['name'] in payload.answers:
                     value = payload.answers[field['name']]
                 elif field['label'] in payload.answers:
                     value = payload.answers[field['label']]
-                else:
+                
+                if value is None:
                     continue
                 
                 try:
@@ -331,8 +335,9 @@ class ApplicationProcessor:
             submit_clicked = False
             for selector in submit_selectors:
                 try:
-                    if await page.locator(selector).first.is_visible():
-                        await page.locator(selector).first.click()
+                    btn = page.locator(selector).first
+                    if await btn.is_visible():
+                        await btn.click()
                         submit_clicked = True
                         logger.info(f"Clicked submit button: {selector}")
                         break
@@ -426,11 +431,15 @@ class ApplicationProcessor:
                 except Exception as e:
                     logger.warning(f"Failed to scrape {url}: {e}")
             
+            # Combine results
+            combined_content = '\n\n'.join([r['content'] for r in results]) if results else "No relevant content found"
+            
             return {
+                "status": "success",
                 "company": company_name,
                 "keywords": keywords,
                 "pages_scraped": len(results),
-                "content": '\n\n'.join([r['content'] for r in results])
+                "content": combined_content
             }
             
         except Exception as e:
@@ -451,7 +460,7 @@ async def lifespan(app: FastAPI):
     
     # Initialize Redis connection
     try:
-        redis_client = await redis.create_redis_pool(
+        redis_client = redis.create_redis_pool(
             f"redis://{config.REDIS_HOST}:{config.REDIS_PORT}",
             password=config.REDIS_PASSWORD,
             encoding="utf-8"
@@ -528,7 +537,7 @@ async def process_application_queue():
             logger.error(f"Queue processor error: {e}")
             await asyncio.sleep(5)
 
-# API Endpoints
+# ============= API ENDPOINTS =============
 
 @app.get("/")
 async def root():
@@ -550,3 +559,293 @@ async def health():
         "queue_size": application_queue.qsize(),
         "redis": "connected" if redis_client else "disconnected"
     }
+
+# ============= MAIN API ENDPOINTS =============
+
+@app.post("/apply/submit")
+async def submit_application(payload: ApplicationPayload, background_tasks: BackgroundTasks):
+    """Submit a job application - Queue for processing"""
+    
+    # Basic validation
+    if not payload.answers:
+        raise HTTPException(status_code=400, detail="Answers cannot be empty")
+    
+    # Add default answers if missing
+    if 'email' not in payload.answers and 'full_name' not in payload.answers:
+        logger.warning(f"Missing basic fields for job {payload.job_id}")
+    
+    # Check queue capacity
+    if application_queue.full():
+        raise HTTPException(
+            status_code=503, 
+            detail="Application queue is full. Please try again later."
+        )
+    
+    # Add to queue
+    try:
+        await application_queue.put(payload)
+        
+        # Track active application
+        active_applications[payload.job_id] = {
+            "queued_at": datetime.utcnow().isoformat(),
+            "priority": payload.priority,
+            "url": payload.application_url
+        }
+        
+        # Store initial status in Redis if available
+        if redis_client:
+            await redis_client.setex(
+                f"job_status:{payload.job_id}",
+                3600,
+                json.dumps({
+                    "status": "queued",
+                    "position": application_queue.qsize(),
+                    "estimated_time": f"{application_queue.qsize() * 2} minutes"
+                })
+            )
+        
+        logger.info(f"Application queued for job {payload.job_id}")
+        
+        return {
+            "status": "queued",
+            "message": f"Application for job {payload.job_id} has been queued",
+            "job_id": payload.job_id,
+            "position": application_queue.qsize(),
+            "estimated_time": f"{application_queue.qsize() * 2} minutes"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to queue application: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue application: {str(e)}")
+
+@app.post("/scrape/deep")
+async def deep_scrape_endpoint(payload: DeepScrapePayload):
+    """Perform deep scraping for company information"""
+    
+    logger.info(f"Deep scrape requested for {payload.company_name}")
+    
+    # Check cache first if Redis is available
+    if redis_client:
+        cache_key = f"scrape:{payload.company_name}:{','.join(payload.keywords)}"
+        cached = await redis_client.get(cache_key)
+        if cached:
+            logger.info("Returning cached scrape results")
+            return json.loads(cached)
+    
+    # Perform scraping
+    async with ApplicationProcessor() as processor:
+        try:
+            result = await processor.deep_scrape(
+                payload.company_name,
+                payload.keywords,
+                payload.max_pages or 3
+            )
+            
+            # Cache result if Redis is available
+            if redis_client and result.get("status") == "success":
+                await redis_client.setex(
+                    cache_key, 
+                    86400,  # Cache for 24 hours
+                    json.dumps(result)
+                )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Deep scrape failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Scraping failed: {str(e)}"
+            )
+
+@app.post("/apply/analyze")
+async def analyze_application_form(payload: AnalyzePayload):
+    """Analyze an application form to understand its structure"""
+    
+    logger.info(f"Analyzing form at {payload.application_url}")
+    
+    async with ApplicationProcessor() as processor:
+        page = await processor.context.new_page()
+        
+        try:
+            # Navigate to the application URL
+            await page.goto(payload.application_url, wait_until="networkidle", timeout=30000)
+            
+            # Analyze the form
+            fields = await FormAnalyzer.analyze_form(page)
+            
+            # Take a screenshot for reference
+            screenshot_name = f"form_analysis_{hashlib.md5(payload.application_url.encode()).hexdigest()}.png"
+            screenshot_path = f"{config.SCREENSHOT_DIR}/{screenshot_name}"
+            await page.screenshot(path=screenshot_path, full_page=True)
+            
+            # Categorize fields
+            field_categories = {}
+            for field in fields:
+                category = field['classification']
+                if category not in field_categories:
+                    field_categories[category] = []
+                field_categories[category].append({
+                    'name': field['name'],
+                    'type': field['type'],
+                    'required': field['required'],
+                    'label': field['label']
+                })
+            
+            # Identify required fields
+            required_fields = [f for f in fields if f.get('required')]
+            
+            # Build form schema
+            form_schema = {
+                "fields": fields,
+                "submit_button_selector": 'button[type="submit"]'  # Default, could be detected
+            }
+            
+            return {
+                "status": "success",
+                "url": payload.application_url,
+                "fields_count": len(fields),
+                "required_fields_count": len(required_fields),
+                "field_categories": field_categories,
+                "schema": form_schema,
+                "screenshot": f"/screenshots/{screenshot_name}",
+                "analyzed_at": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Form analysis failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Form analysis failed: {str(e)}"
+            )
+        
+        finally:
+            await page.close()
+
+# ============= ADDITIONAL ENDPOINTS =============
+
+@app.get("/apply/status/{job_id}")
+async def get_application_status(job_id: str):
+    """Get the status of a queued or processed application"""
+    
+    # Check Redis for status
+    if redis_client:
+        status_data = await redis_client.get(f"job_status:{job_id}")
+        if status_data:
+            return json.loads(status_data)
+    
+    # Check if in active applications
+    if job_id in active_applications:
+        return {
+            "status": "processing",
+            "details": active_applications[job_id]
+        }
+    
+    # Not found
+    return {
+        "status": "not_found",
+        "job_id": job_id,
+        "message": "Application not found in queue or recent history"
+    }
+
+@app.get("/metrics")
+async def get_metrics():
+    """Get service metrics and statistics"""
+    
+    metrics = {
+        "queue_size": application_queue.qsize(),
+        "queue_capacity": application_queue.maxsize,
+        "active_applications": len(active_applications),
+        "rate_limit": config.RATE_LIMIT_PER_MINUTE,
+        "redis_connected": redis_client is not None
+    }
+    
+    # Add screenshot count
+    try:
+        screenshots = os.listdir(config.SCREENSHOT_DIR)
+        metrics["screenshots_count"] = len(screenshots)
+    except:
+        metrics["screenshots_count"] = 0
+    
+    # Add Redis metrics if available
+    if redis_client:
+        try:
+            metrics["redis_keys"] = await redis_client.dbsize()
+        except:
+            pass
+    
+    return metrics
+
+@app.delete("/cache/clear")
+async def clear_cache():
+    """Clear all cached data in Redis"""
+    
+    if not redis_client:
+        return {
+            "status": "no_cache",
+            "message": "Redis is not connected"
+        }
+    
+    try:
+        await redis_client.flushdb()
+        return {
+            "status": "success",
+            "message": "Cache cleared successfully"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear cache: {str(e)}"
+        )
+
+@app.delete("/screenshots/cleanup")
+async def cleanup_screenshots(days_old: int = 7):
+    """Clean up old screenshots"""
+    
+    try:
+        cutoff_time = datetime.now() - timedelta(days=days_old)
+        deleted_count = 0
+        
+        for filename in os.listdir(config.SCREENSHOT_DIR):
+            filepath = os.path.join(config.SCREENSHOT_DIR, filename)
+            file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+            
+            if file_time < cutoff_time:
+                os.remove(filepath)
+                deleted_count += 1
+        
+        return {
+            "status": "success",
+            "deleted_files": deleted_count,
+            "message": f"Deleted {deleted_count} screenshots older than {days_old} days"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Cleanup failed: {str(e)}"
+        )
+
+# Error handler
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "An internal error occurred",
+            "error": str(exc),
+            "path": request.url.path
+        }
+    )
+
+# Run the application
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=config.SERVICE_PORT,
+        reload=False,
+        log_level=config.LOG_LEVEL.lower()
+    )
