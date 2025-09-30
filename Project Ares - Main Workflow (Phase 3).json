@@ -1,0 +1,899 @@
+{
+  "name": "Project Ares - Main Workflow (Phase 3)",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-service:8001/api/generate-standard-coverletter",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_details\": {\n    \"job_title\": \"{{ $json.jobTitle }}\",\n    \"company_name\": \"{{ $json.companyName }}\",\n    \"job_description_text\": \"{{ JSON.parse($json.dossier).jobDescriptionText || '' }}\",\n    \"job_id\": \"{{ $json.jobId }}\",\n    \"source\": \"{{ $json.source }}\"\n  },\n  \"user_profile\": {\n    \"name\": \"Ares Applicant\",\n    \"skills\": \"Software Engineering, Python, Node.js, Cloud Services, Docker\",\n    \"experience\": \"5+ years developing scalable backend applications.\"\n  }\n}",
+        "options": {}
+      },
+      "name": "8a. Generate Cover Letter (FAA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        576
+      ],
+      "id": "ea5c8ecc-79f2-4ff2-aca4-d13d3832b636",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get ALL cover letter items from the input of this node\nconst coverLetterItems = $input.all();\n\n// Get ALL job data items from the '6. Route by Action (Switch)' node\nconst jobDataItems = $('6. Route by Action (Switch)').all().filter(item => item.json.action === 'full_auto_apply');\n\n// Use .map() to process each item. The 'index' is crucial for pairing them up.\nconst results = coverLetterItems.map((coverLetterItem, index) => {\n  const coverLetterData = coverLetterItem.json;\n  // Get the job data that has the same index as the cover letter\n  const jobData = jobDataItems[index].json;\n\n  const applicationUrl = JSON.parse(jobData.dossier).jobDescriptionUrl;\n\n  const payload = {\n    application_url: applicationUrl,\n    job_id: jobData.jobId,\n    answers: {\n      \"name\": \"Ares Applicant\",\n      \"email\": \"applicant@project-ares.dev\",\n      \"cover_letter\": coverLetterData.cover_letter\n    },\n    db_id: jobData.id\n  };\n\n  // Return each result in the format n8n expects\n  return { json: payload };\n});\n\n// Return the full array of processed items\nreturn results;"
+      },
+      "name": "8b. Prepare Apply Payload (FAA)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        648
+      ],
+      "id": "1898b6db-7809-40c8-aff3-26d7ca9fdea7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://automation-service:8000/apply/submit",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "name": "8c. Submit Application (FAA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        648
+      ],
+      "id": "551dde8b-a133-4fe6-8b86-9d8f7ab71563",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://analytics-service:8080/api/applications/{{ $('8b. Prepare Apply Payload (FAA)').first().json.db_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n    \"status\": \"APPLIED\"\n}",
+        "options": {}
+      },
+      "name": "8d. Update DB to 'APPLIED' (FAA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        720
+      ],
+      "id": "f6b32c1e-7e8e-4043-987c-fb94bfe2bf92",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://webhook-test.com/35695c41a6bec1b32c78cb66f1b7177e",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{$json}}"
+      },
+      "name": "Send Simple Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        864
+      ],
+      "id": "9d4e37b2-8c76-42ba-ae5b-5e188dc6b980",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://automation-service:8000/scrape/deep",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"company_name\": \"{{ $json.companyName }}\",\n  \"keywords\": {{ $json.jobTitle.split(' ') }}\n}",
+        "options": {}
+      },
+      "name": "7a-GP. Deep Scrape",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        48
+      ],
+      "id": "7c40775d-dda3-4c1e-908d-991ab86f81d6",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-service:8001/api/generate-dossier",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"job_details\": {\n    \"job_title\": \"{{ $json.jobTitle }}\",\n    \"company_name\": \"{{ $json.companyName }}\",\n    \"job_description_text\": \"{{ JSON.parse($json.dossier).jobDescriptionText || '' }}\",\n    \"job_id\": \"{{ $json.jobId }}\",\n    \"source\": \"{{ $json.source }}\"\n  },\n  \"user_profile\": {\n    \"name\": \"Ares Applicant\",\n    \"skills\": \"Software Engineering, Python, Node.js, Cloud Services, Docker\",\n    \"experience\": \"5+ years developing scalable backend applications.\"\n  },\n  \"context_text\": \"{{ $('7a-GP. Deep Scrape').first().json.content }}\"\n}",
+        "options": {}
+      },
+      "name": "7b-GP. Generate Dossier",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        -24
+      ],
+      "id": "d42bc01e-2dfa-4c4d-bfcf-c99fd3c2db09",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://automation-service:8000/apply/analyze",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"application_url\": \"{{ JSON.parse($json.dossier).jobDescriptionUrl }}\"\n}",
+        "options": {}
+      },
+      "name": "7c-GP. Analyze Form",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        544,
+        -96
+      ],
+      "id": "9da3f466-f541-4e2a-9e84-440601a295c7",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-service:8001/api/generate-answers",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"application_questions\": {{ $('7c-GP. Analyze Form').first().json.schema.fields }},\n  \"strategy_dossier\": {{ $('7b-GP. Generate Dossier').first().json.dossier }}\n}",
+        "options": {}
+      },
+      "name": "7d-GP. Generate Answers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        -168
+      ],
+      "id": "faa887b7-1c2a-4aa4-be37-6ac05b25520d",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://analytics-service:8080/api/applications/{{ $('6. Route by Action (Switch)').first().json.id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n    \"status\": \"WAITING_APPROVAL\",\n    \"action_type\": \"guardian_protocol\"\n}",
+        "options": {}
+      },
+      "name": "7e-GP. Log WAITING_APPROVAL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        -240
+      ],
+      "id": "21e28226-2a69-46c9-ab15-cd9b982fdd24",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://telegram.bot.com/send-dossier-alert",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{\n  {\n    \"job_id\": $('6. Route by Action (Switch)').first().json.jobId,\n    \"dossier\": $('7b-GP. Generate Dossier').first().json.dossier,\n    \"answers\": $('7d-GP. Generate Answers').first().json.answers\n  }\n}}"
+      },
+      "name": "7f-GP. Send Approval Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -304
+      ],
+      "id": "161c92fa-2a91-497b-803e-8302d94a4e34",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2592,
+        896
+      ],
+      "id": "62bd85be-e94b-4a28-bf32-0883c0f0b7ac"
+    },
+    {
+      "parameters": {
+        "url": "https://www.foundit.in/search/software-engineer-jobs-in-pune",
+        "options": {}
+      },
+      "name": "1. Scrape Job Board1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2368,
+        1208
+      ],
+      "id": "5f89c2b3-aee9-42a7-b725-b904f7d94d04",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.all()[0].json.data;\nconst scriptRegex = /<script type=\\\"application\\/ld\\+json\\\">([\\s\\S]*?)<\\/script>/;\nconst match = html.match(scriptRegex);\nif (match && match[1]) {\n  try {\n    const jsonData = JSON.parse(match[1]);\n    if (jsonData['@type'] === 'ItemList' && jsonData.itemListElement) {\n      return jsonData.itemListElement.map(item => ({\n        json: {\n          jobTitle: item.name,\n          location: item.jobLocation?.address?.addressLocality,\n          jobDescriptionText: item.description,\n          url: item.url,\n          image: item.image,\n          companyName: item.hiringOrganization?.name\n        }\n      }));\n    }\n  } catch (e) {\n    return [];\n  }\n}\nreturn [];"
+      },
+      "name": "2. Parse HTML for Jobs1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2144,
+        1280
+      ],
+      "id": "f7259911-989e-4645-b8ec-2e576b339717"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 3. Standardize Job JSON (Corrected to always include a location)\nconst items = $input.all();\n\n// Helper to format the final company name nicely\nfunction toTitleCase(str) {\n  if (!str) return '';\n  // Cleans up and capitalizes the name\n  return str.replace(/[^a-zA-Z0-9\\s]/g, ' ').trim().replace(\n    /\\w\\S*/g,\n    txt => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()\n  );\n}\n\nconst output = [];\nfor (const item of items) {\n  const json = item.json;\n  let companyName = json.companyName; // Use the name from the list page if available\n\n  // If the company name is missing from the initial scrape, parse it from the URL\n  if (!companyName) {\n    try {\n      const urlParts = json.url.split('/');\n      const slug = urlParts[urlParts.length - 1];\n      const slugWithoutId = slug.replace(/-\\d+$/, '');\n      const slugParts = slugWithoutId.split('-');\n      \n      const titleParts = json.jobTitle.toLowerCase().split(/[^a-z0-9]/).filter(Boolean);\n      const locationParts = (json.location || '').toLowerCase().split(/[^a-z0-9]/).filter(Boolean);\n      const potentialCompanyParts = slugParts.filter(p => !titleParts.includes(p) && !locationParts.includes(p));\n      \n      if (potentialCompanyParts.length > 0) {\n        companyName = toTitleCase(potentialCompanyParts.join(' '));\n      }\n\n    } catch (e) {\n      // fallback\n    }\n  }\n\n  // Final fallback\n  if (!companyName) {\n    companyName = 'Unknown Company';\n  }\n\n  const jobIdMatch = json.url.match(/(\\d+)$/);\n  const jobId = jobIdMatch ? jobIdMatch[1] : null;\n\n  const dossierObject = {\n    jobDescriptionUrl: json.url,\n    // --- THIS IS THE FIX ---\n    // Use json.location if it exists, otherwise fallback to the cleaned companyName\n    location: json.location || companyName,\n    jobDescriptionText: json.jobDescriptionText || ''\n  };\n\n  output.push({\n    json: {\n      jobId: 'foundit_' + jobId,\n      jobTitle: json.jobTitle,\n      companyName: companyName,\n      source: 'foundit.in',\n      status: 'NOTIFIED',\n      dossier: JSON.stringify(dossierObject)\n    }\n  });\n}\n\nreturn output;"
+      },
+      "name": "3. Standardize Job JSON1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1920,
+        1280
+      ],
+      "id": "88f9d0bf-0189-42f4-b297-978d84c93032"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -576,
+        584
+      ],
+      "id": "ab3abfd3-542a-42ad-b188-779de0fafde6",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/config/profiles.yaml",
+        "options": {
+          "fileName": "profiles.yaml"
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -800,
+        584
+      ],
+      "id": "45fc08d5-7788-4637-b33a-fabc078e8bc2",
+      "name": "Read/Write Files from Disk1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- DEFINITIVE FINAL CODE for 5b. Triage Job ---\nconst { Buffer } = require('buffer');\nconst yaml = require('js-yaml');\nconst allItems = $input.all();\n\n// --- Step 1: Read and Parse the profiles.yaml file ---\nconst fileItem = allItems[0];\nlet profiles = []; \n\nif (fileItem.binary && fileItem.binary.data && fileItem.binary.data.data) {\n  try {\n    const base64Data = fileItem.binary.data.data;\n    const profilesYaml = Buffer.from(base64Data, 'base64').toString('utf8');\n    // Use .load() which is safe by default in js-yaml v4+\n    profiles = yaml.load(profilesYaml);\n  } catch (e) {\n    // If parsing fails, profiles will be empty.\n  }\n}\n\n// --- Step 2: Triage the Jobs ---\nconst allJobs = allItems.slice(1);\n\nconst results = allJobs.map(item => {\n  const job = item.json;\n  let action = 'simple_alert';\n\n  if (Array.isArray(profiles)) {\n    for (const profile of profiles) {\n      let match = true;\n\n      // --- All Matching Logic ---\n      if (match && profile.companies) {\n        let companyMatch = false; \n        if (job.companyName) {\n          const jobCompanyWords = job.companyName.toLowerCase().split(/\\s+/);\n          companyMatch = profile.companies.some(profileCompany => {\n            const profileCompanyWords = profileCompany.toLowerCase().split(/\\s+/);\n            return profileCompanyWords.every(word => jobCompanyWords.includes(word));\n          });\n        }\n        if (!companyMatch) {\n          match = false;\n        }\n      }\n\n      if (match && profile.locations) {\n        let locationMatch = false;\n        try {\n          const jobLocationString = JSON.parse(job.dossier).location || '';\n          if (jobLocationString) {\n            const jobLocationWords = jobLocationString.toLowerCase().split(/\\s+/);\n            locationMatch = profile.locations.some(\n              profileLoc => jobLocationWords.includes(profileLoc.toLowerCase())\n            );\n          }\n        } catch (e) {}\n        if (!locationMatch) {\n          match = false;\n        }\n      }\n\n      if (match && profile.roles) {\n        if (!job.jobTitle || !profile.roles.some(role => job.jobTitle.toLowerCase().includes(role.toLowerCase()))) {\n          match = false;\n        }\n      }\n\n      if (match && profile.sources) {\n        if (!job.source || !profile.sources.some(src => job.source.toLowerCase().includes(src.toLowerCase()))) {\n          match = false;\n        }\n      }\n\n      if (match && profile.exclude_roles) {\n        if (job.jobTitle && profile.exclude_roles.some(role => job.jobTitle.toLowerCase().includes(role.toLowerCase()))) {\n          match = false;\n        }\n      }\n      \n      if (match) {\n        action = profile.action;\n        break;\n      }\n    }\n  }\n\n  job.action = action;\n  return { json: job };\n});\n\nreturn results;"
+      },
+      "name": "5b. Triage Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        584
+      ],
+      "id": "675bf883-306c-4a4c-8143-7df6793943b5"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "guardian_protocol",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "a75e2d8f-7ffb-46f8-a644-cf523d69d647"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "guardian_protocol"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d3218fa0-f293-4fd4-829a-c9e68d18f40e",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "full_auto_apply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "full_auto_apply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "59350c31-878b-4915-83aa-e671c1e14ba9",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "simple_alert",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "simple_alert"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -128,
+        568
+      ],
+      "id": "7e0cf35e-1ffe-44e4-86b1-1db664a6c708",
+      "name": "6. Route by Action (Switch)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://analytics-service:8080/api/errors",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1664,
+        480
+      ],
+      "id": "2402fd9a-87d1-4569-b851-c90aa6be7ac7",
+      "name": "Log Errors to DB"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: \"Central Error Handler\"\n// Type: n8n-nodes-base.code\n// Connect this to ALL error outputs from HTTP nodes\n\nconst errors = $input.all();\nconst processedErrors = [];\n\n// Process each error\nfor (const [index, error] of errors.entries()) {\n    // Determine which node failed\n    let sourceName = 'Unknown Node';\n    let jobData = {};\n    \n    // Try to extract job information from the error context\n    try {\n        // Check if error has job information\n        if (error.json.jobId) {\n            jobData = {\n                jobId: error.json.jobId,\n                jobTitle: error.json.jobTitle,\n                companyName: error.json.companyName\n            };\n        }\n    } catch (e) {\n        // Fallback if no job data\n    }\n    \n    // Create error record\n    const errorRecord = {\n        id: `error_${Date.now()}_${index}`,\n        timestamp: new Date().toISOString(),\n        error: {\n            message: error.json.message || error.json.error?.message || 'Unknown error',\n            statusCode: error.json.error?.statusCode,\n            type: error.json.error?.name || 'ApplicationError'\n        },\n        context: jobData,\n        workflow: {\n            executionId: $execution.id,\n            workflowId: $workflow.id,\n            workflowName: $workflow.name\n        }\n    };\n    \n    processedErrors.push({ json: errorRecord });\n}\n\nreturn processedErrors;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        480
+      ],
+      "id": "9d4c981c-c14d-4f08-b661-3138e79a162f",
+      "name": "Central Error Handler"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://analytics-service:8080/api/applications/check-duplicates-bulk",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.jobs }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1472,
+        1280
+      ],
+      "id": "200bb150-4877-4baa-a08f-8eab9ec6767c",
+      "name": "3b. Check Duplicates",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the duplicate check results\nconst checkResult = $input.first().json;\nconst duplicateJobIds = new Set(checkResult.duplicates || []);\n\n// Get the original jobs from the standardize node\nconst originalJobs = $('3. Standardize Job JSON1').all();\n\n// Filter to keep only unique jobs\nconst uniqueJobs = [];\nconst skippedJobs = [];\n\nfor (const job of originalJobs) {\n    if (!duplicateJobIds.has(job.json.jobId)) {\n        uniqueJobs.push(job);\n    } else {\n        skippedJobs.push(job.json.jobId);\n    }\n}\n\n// Log what we're doing\nif (skippedJobs.length > 0) {\n    console.log(`Skipping ${skippedJobs.length} duplicate jobs: ${skippedJobs.join(', ')}`);\n}\n\nconsole.log(`Processing ${uniqueJobs.length} unique jobs out of ${originalJobs.length} total`);\n\nreturn uniqueJobs;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        1352
+      ],
+      "id": "cee6b678-10db-45dc-aadc-8f7d2080a414",
+      "name": "3c. Filter Unique Jobs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge the database response with original job data\nconst dbResponses = $input.all();\nconst processedJobs = [];\n\nfor (let i = 0; i < dbResponses.length; i++) {\n    const dbResponse = dbResponses[i].json;\n    \n    // Add the database ID to each job\n    processedJobs.push({\n        json: {\n            ...dbResponse,\n            // The DB response contains all fields including the ID\n            dbId: dbResponse.id\n        }\n    });\n}\n\nreturn processedJobs;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        1424
+      ],
+      "id": "aa815b30-3d15-41a2-842d-843c7ff75ac0",
+      "name": "3e. Add DB IDs"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://analytics-service:8080/api/applications/upsert",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1024,
+        1352
+      ],
+      "id": "3d7a5b94-d3fc-4728-9377-8c479c6a088b",
+      "name": "3d. Upsert Jobs to DB",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare the payload for bulk duplicate checking\nconst jobs = $input.all();\n\nconst checkPayload = jobs.map(job => ({\n    jobId: job.json.jobId,\n    companyName: job.json.companyName,\n    jobTitle: job.json.jobTitle\n}));\n\n// Return as a single item with the array\nreturn [{\n    json: {\n        jobs: checkPayload\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1696,
+        1280
+      ],
+      "id": "7579a90f-2dce-498b-ab92-e692b0f6e145",
+      "name": "3c. Filter Unique Jobs1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "8b. Prepare Apply Payload (FAA)": {
+      "main": [
+        [
+          {
+            "node": "8c. Submit Application (FAA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8c. Submit Application (FAA)": {
+      "main": [
+        [
+          {
+            "node": "8d. Update DB to 'APPLIED' (FAA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8a. Generate Cover Letter (FAA)": {
+      "main": [
+        [
+          {
+            "node": "8b. Prepare Apply Payload (FAA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8d. Update DB to 'APPLIED' (FAA)": {
+      "main": [
+        [
+          {
+            "node": "Send Simple Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7a-GP. Deep Scrape": {
+      "main": [
+        [
+          {
+            "node": "7b-GP. Generate Dossier",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7b-GP. Generate Dossier": {
+      "main": [
+        [
+          {
+            "node": "7c-GP. Analyze Form",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7c-GP. Analyze Form": {
+      "main": [
+        [
+          {
+            "node": "7d-GP. Generate Answers",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7d-GP. Generate Answers": {
+      "main": [
+        [
+          {
+            "node": "7e-GP. Log WAITING_APPROVAL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7e-GP. Log WAITING_APPROVAL": {
+      "main": [
+        [
+          {
+            "node": "7f-GP. Send Approval Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "1. Scrape Job Board1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read/Write Files from Disk1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Scrape Job Board1": {
+      "main": [
+        [
+          {
+            "node": "2. Parse HTML for Jobs1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Parse HTML for Jobs1": {
+      "main": [
+        [
+          {
+            "node": "3. Standardize Job JSON1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Standardize Job JSON1": {
+      "main": [
+        [
+          {
+            "node": "3c. Filter Unique Jobs1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "5b. Triage Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5b. Triage Job": {
+      "main": [
+        [
+          {
+            "node": "6. Route by Action (Switch)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Route by Action (Switch)": {
+      "main": [
+        [
+          {
+            "node": "7a-GP. Deep Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "8a. Generate Cover Letter (FAA)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Simple Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7f-GP. Send Approval Alert": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Simple Alert": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Central Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Log Errors to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3c. Filter Unique Jobs": {
+      "main": [
+        [
+          {
+            "node": "3d. Upsert Jobs to DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3b. Check Duplicates": {
+      "main": [
+        [
+          {
+            "node": "3c. Filter Unique Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3d. Upsert Jobs to DB": {
+      "main": [
+        [
+          {
+            "node": "3e. Add DB IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Central Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3c. Filter Unique Jobs1": {
+      "main": [
+        [
+          {
+            "node": "3b. Check Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3e. Add DB IDs": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "eab9ec07-cbdd-467f-9f7a-628ea1964618",
+  "meta": {
+    "instanceId": "5a1bc7bdbda79678da2361de6bc7c91cd90d534cd561a00733a95bb182b8c298"
+  },
+  "id": "WfwqCVvm6Wpi4Gsq",
+  "tags": []
+}
