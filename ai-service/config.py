@@ -1,11 +1,14 @@
 # ai-service/config.py
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from typing import Optional, List
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
-    """Centralized configuration using Pydantic BaseSettings"""
+    """Centralized configuration with flexible validation"""
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -19,6 +22,10 @@ class Settings(BaseSettings):
     ai_model: str = Field("gemini-pro", env="AI_MODEL")
     ai_max_retries: int = Field(3, env="AI_MAX_RETRIES")
     ai_timeout: int = Field(30, env="AI_TIMEOUT")
+    
+    # Service modes
+    require_gemini: bool = Field(False, env="REQUIRE_GEMINI")
+    test_mode: bool = Field(False, env="TEST_MODE")
     
     # Redis Configuration
     redis_host: str = Field("localhost", env="REDIS_HOST")
@@ -51,25 +58,46 @@ class Settings(BaseSettings):
     max_response_length: int = Field(2000, env="MAX_RESPONSE_LENGTH")
     cache_enabled: bool = Field(True, env="CACHE_ENABLED")
     
-    @validator("gemini_api_key")
-    def validate_api_key(cls, v):
-        if not v:
-            raise ValueError("GEMINI_API_KEY is required")
+    @field_validator("gemini_api_key")
+    @classmethod
+    def validate_api_key(cls, v: str, info) -> str:
+        """Flexible API key validation"""
+        # Get other values from the validation context
+        values = info.data
+        require_gemini = values.get('require_gemini', False)
+        test_mode = values.get('test_mode', False)
+        
+        # Strict mode: fail if required but missing
+        if require_gemini and not v:
+            raise ValueError("GEMINI_API_KEY is required when REQUIRE_GEMINI=true")
+        
+        # Warning mode: log but don't fail
+        if not v and not test_mode:
+            logger.warning(
+                "No Gemini API key configured. Service will run in limited mode. "
+                "Set TEST_MODE=true to suppress this warning or "
+                "REQUIRE_GEMINI=true to enforce strict validation."
+            )
+        
         return v
     
-    @validator("cors_allowed_origins")
-    def parse_cors_origins(cls, v):
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def parse_cors_origins(cls, v: str) -> List[str]:
         """Convert comma-separated string to list"""
         if isinstance(v, str):
-            return v.split(",")
+            return [origin.strip() for origin in v.split(",")]
         return v
     
-    @validator("log_level")
-    def validate_log_level(cls, v):
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate and normalize log level"""
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        if v.upper() not in valid_levels:
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
             raise ValueError(f"Invalid log level. Must be one of {valid_levels}")
-        return v.upper()
+        return v_upper
     
     @property
     def redis_url(self) -> str:
@@ -77,6 +105,11 @@ class Settings(BaseSettings):
         if self.redis_password:
             return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
         return f"redis://{self.redis_host}:{self.redis_port}"
+    
+    @property
+    def is_production_ready(self) -> bool:
+        """Check if service is configured for production"""
+        return bool(self.gemini_api_key) and not self.test_mode
 
 # Create singleton instance
 settings = Settings()
