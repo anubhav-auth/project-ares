@@ -3,5 +3,9 @@ uvicorn[standard]
 google-generativeai
 redis
 pydantic
+pydantic-settings # Added
 python-dotenv
 httpx
+aiofiles
+prometheus-fastapi-instrumentator
+python-multipart
