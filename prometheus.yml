@@ -1,0 +1,24 @@
+# prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'analytics-service'
+    static_configs:
+      - targets: ['analytics-service:8080']
+    metrics_path: '/actuator/prometheus'
+    
+  - job_name: 'automation-service'
+    static_configs:
+      - targets: ['automation-service:8000']
+    metrics_path: '/metrics'
+    
+  - job_name: 'ai-service'
+    static_configs:
+      - targets: ['ai-service:8001']
+    metrics_path: '/metrics'
+    
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
