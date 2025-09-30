@@ -13,14 +13,16 @@ services:
       - "5432:5432"
 
   n8n:
-    image: n8nio/n8n
+    build:          # <-- This says "Build a custom container..."
+      context: .
+      dockerfile: Dockerfile
     container_name: ares-n8n
     restart: unless-stopped
     ports:
       - "5678:5678"
     environment:
       - GENERIC_TIMEZONE=Asia/Kolkata
-      - NODE_FUNCTION_ALLOW_EXTERNAL=js-yaml 
+      - NODE_FUNCTION_ALLOW_EXTERNAL=js-yaml,buffer
     volumes:
       - ./n8n_data:/home/node/.n8n
       - ./config:/home/node/config 
