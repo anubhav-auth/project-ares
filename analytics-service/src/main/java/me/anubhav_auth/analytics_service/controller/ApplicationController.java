@@ -3,19 +3,18 @@ package me.anubhav_auth.analytics_service.controller;
 import lombok.RequiredArgsConstructor;
 import me.anubhav_auth.analytics_service.dto.ApplicationStats;
 import me.anubhav_auth.analytics_service.dto.BulkUpdateRequest;
+import me.anubhav_auth.analytics_service.dto.DuplicateCheckRequest;
 import me.anubhav_auth.analytics_service.entity.Application;
 import me.anubhav_auth.analytics_service.entity.WorkflowError;
 import me.anubhav_auth.analytics_service.repository.ApplicationRepository;
 import me.anubhav_auth.analytics_service.repository.ErrorRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/applications")
@@ -26,12 +25,64 @@ public class ApplicationController {
     private final ErrorRepository errorRepository;
 
     @PostMapping
-    public Application createApplication(@RequestBody Application application) {
+    public ResponseEntity<Application> createApplication(@RequestBody Application application) {
+        // Check for duplicates BEFORE saving
+        boolean isDuplicate = checkForDuplicate(
+                application.getJobId(),
+                application.getCompanyName(),
+                application.getJobTitle()
+        );
+
+        if (isDuplicate) {
+            // Return conflict status with existing application
+            Optional<Application> existing = applicationRepository.findByJobId(application.getJobId());
+            if (existing.isPresent()) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(existing.get());
+            }
+        }
+
         // Set default status if not provided
         if (application.getStatus() == null) {
             application.setStatus("NOTIFIED");
         }
-        return applicationRepository.save(application);
+
+        try {
+            Application saved = applicationRepository.save(application);
+            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        } catch (Exception e) {
+            // Handle unique constraint violation
+            if (e.getMessage().contains("duplicate") || e.getMessage().contains("unique")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).build();
+            }
+            throw e;
+        }
+    }
+
+    @PostMapping("/upsert")
+    public ResponseEntity<Application> upsertApplication(@RequestBody Application application) {
+        // Find existing by jobId or create new
+        Optional<Application> existing = applicationRepository.findByJobId(application.getJobId());
+
+        if (existing.isPresent()) {
+            Application existingApp = existing.get();
+            // Update only if status is still NOTIFIED (hasn't been processed)
+            if ("NOTIFIED".equals(existingApp.getStatus())) {
+                existingApp.setJobTitle(application.getJobTitle());
+                existingApp.setCompanyName(application.getCompanyName());
+                existingApp.setDossier(application.getDossier());
+                existingApp.setSource(application.getSource());
+                return ResponseEntity.ok(applicationRepository.save(existingApp));
+            } else {
+                // Already processed, don't update
+                return ResponseEntity.status(HttpStatus.NOT_MODIFIED).body(existingApp);
+            }
+        } else {
+            // New application
+            if (application.getStatus() == null) {
+                application.setStatus("NOTIFIED");
+            }
+            return ResponseEntity.status(HttpStatus.CREATED).body(applicationRepository.save(application));
+        }
     }
 
     @GetMapping
@@ -71,26 +122,108 @@ public class ApplicationController {
     }
 
     @GetMapping("/check-duplicate")
-    public ResponseEntity<Map<String, Boolean>> checkDuplicate(
-            @RequestParam String jobKey) {
+    public ResponseEntity<Map<String, Object>> checkDuplicate(
+            @RequestParam(required = false) String jobId,
+            @RequestParam(required = false) String companyName,
+            @RequestParam(required = false) String jobTitle,
+            @RequestParam(defaultValue = "24") int hoursBack) {
 
-        // Check if similar job was applied to recently
-        Instant oneDayAgo = Instant.now().minus(1, ChronoUnit.DAYS);
+        Map<String, Object> response = new HashMap<>();
 
-        // Create a composite key from company and job title
-        String[] parts = jobKey.split("_");
-        String companyName = parts.length > 0 ? parts[0] : "";
-        String jobTitle = parts.length > 1 ? parts[1] : "";
+        // Priority 1: Check by unique jobId
+        if (jobId != null && !jobId.isEmpty()) {
+            boolean exists = applicationRepository.existsByJobId(jobId);
+            response.put("exists", exists);
+            response.put("checkMethod", "jobId");
 
-        boolean exists = applicationRepository.existsByCompanyNameAndJobTitleAndCreatedAtAfter(
-                companyName, jobTitle, oneDayAgo
-        );
+            if (exists) {
+                Optional<Application> existing = applicationRepository.findByJobId(jobId);
+                existing.ifPresent(app -> {
+                    response.put("existingId", app.getId());
+                    response.put("existingStatus", app.getStatus());
+                });
+            }
+            return ResponseEntity.ok(response);
+        }
 
-        Map<String, Boolean> response = new HashMap<>();
-        response.put("exists", exists);
+        // Priority 2: Check by company + job title within time window
+        if (companyName != null && jobTitle != null) {
+            Instant cutoffTime = Instant.now().minus(hoursBack, ChronoUnit.HOURS);
 
-        return ResponseEntity.ok(response);
+            boolean exists = applicationRepository.existsByCompanyNameAndJobTitleAndCreatedAtAfter(
+                    companyName, jobTitle, cutoffTime
+            );
+
+            response.put("exists", exists);
+            response.put("checkMethod", "companyAndTitle");
+            response.put("hoursBack", hoursBack);
+
+            if (exists) {
+                List<Application> existingApps = applicationRepository
+                        .findByCompanyNameAndJobTitleAndCreatedAtAfter(companyName, jobTitle, cutoffTime);
+                if (!existingApps.isEmpty()) {
+                    Application mostRecent = existingApps.get(0);
+                    response.put("existingId", mostRecent.getId());
+                    response.put("existingStatus", mostRecent.getStatus());
+                    response.put("duplicateCount", existingApps.size());
+                }
+            }
+            return ResponseEntity.ok(response);
+        }
+
+        // No valid parameters provided
+        response.put("error", "Please provide either jobId or both companyName and jobTitle");
+        return ResponseEntity.badRequest().body(response);
     }
+
+    @PostMapping("/check-duplicates-batch")
+    public ResponseEntity<Map<String, Object>> checkDuplicatesBatch(
+            @RequestBody List<DuplicateCheckRequest> requests) {
+
+        Map<String, Object> results = new HashMap<>();
+        List<String> duplicates = new ArrayList<>();
+        List<String> unique = new ArrayList<>();
+
+        for (DuplicateCheckRequest request : requests) {
+            boolean isDuplicate = checkForDuplicate(
+                    request.getJobId(),
+                    request.getCompanyName(),
+                    request.getJobTitle()
+            );
+
+            if (isDuplicate) {
+                duplicates.add(request.getJobId());
+            } else {
+                unique.add(request.getJobId());
+            }
+        }
+
+        results.put("totalChecked", requests.size());
+        results.put("duplicates", duplicates);
+        results.put("unique", unique);
+        results.put("duplicateCount", duplicates.size());
+        results.put("uniqueCount", unique.size());
+
+        return ResponseEntity.ok(results);
+    }
+
+    private boolean checkForDuplicate(String jobId, String companyName, String jobTitle) {
+        // Check by jobId first
+        if (jobId != null && applicationRepository.existsByJobId(jobId)) {
+            return true;
+        }
+
+        // Check by company and title in last 48 hours
+        if (companyName != null && jobTitle != null) {
+            Instant cutoff = Instant.now().minus(48, ChronoUnit.HOURS);
+            return applicationRepository.existsByCompanyNameAndJobTitleAndCreatedAtAfter(
+                    companyName, jobTitle, cutoff
+            );
+        }
+
+        return false;
+    }
+
 
     @GetMapping("/stats")
     public ResponseEntity<ApplicationStats> getStats() {
