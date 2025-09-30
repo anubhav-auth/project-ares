@@ -5,7 +5,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 import asyncio
 import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # --- Configuration ---
 LOGGING_LEVEL = logging.INFO
@@ -31,7 +31,7 @@ class ApplicationPayload(BaseModel):
     application_url: str
     answers: Dict[str, Any]
     job_id: str = Field(..., description="A unique identifier for the job application.")
-    file_uploads: Optional[list[FileUpload]] = Field(None, description="List of files to upload.")
+    file_uploads: Optional[List[FileUpload]] = Field(None, description="List of files to upload.")
 
 
 app = FastAPI(

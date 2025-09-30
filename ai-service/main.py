@@ -1,7 +1,7 @@
 # ai-service/main.py
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
 app = FastAPI(
     title="Project Ares - AI Core",
