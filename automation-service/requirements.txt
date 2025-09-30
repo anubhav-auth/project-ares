@@ -2,12 +2,11 @@ fastapi
 uvicorn[standard]
 playwright
 beautifulsoup4
-redis[hiredis]
+redis
 aiofiles
 pydantic
 python-dotenv
 httpx
 lxml
-aioredis
 prometheus-fastapi-instrumentator
 python-multipart
