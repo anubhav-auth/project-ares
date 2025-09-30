@@ -1,65 +1,169 @@
+version: '3.8'
+
 services:
   postgres:
     image: postgres:15
     container_name: ares-postgres
     restart: unless-stopped
+    env_file: .env
     environment:
-      - POSTGRES_USER=ares
-      - POSTGRES_PASSWORD=yoursecurepassword
-      - POSTGRES_DB=ares_db
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ares-redis
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      sh -c '
+        if [ -n "${REDIS_PASSWORD}" ]; then
+          redis-server --requirepass ${REDIS_PASSWORD}
+        else
+          redis-server
+        fi
+      '
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   n8n:
-    build:          # <-- This says "Build a custom container..."
+    build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - NODE_VERSION=18
     container_name: ares-n8n
     restart: unless-stopped
+    env_file: .env
     ports:
-      - "5678:5678"
+      - "${N8N_PORT}:5678"
     environment:
-      - GENERIC_TIMEZONE=Asia/Kolkata
-      - NODE_FUNCTION_ALLOW_EXTERNAL=js-yaml,buffer
+      - GENERIC_TIMEZONE=${N8N_TIMEZONE}
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - NODE_FUNCTION_ALLOW_EXTERNAL=${NODE_FUNCTION_ALLOW_EXTERNAL}
+      - N8N_LOG_LEVEL=${LOG_LEVEL}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+      - DB_POSTGRESDB_HOST=${POSTGRES_HOST}
+      - DB_POSTGRESDB_PORT=${POSTGRES_PORT}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
-      - ./n8n_data:/home/node/.n8n
-      - ./config:/home/node/config 
+      - n8n_data:/home/node/.n8n
+      - ./config:/home/node/config
+      - ./workflows:/home/node/workflows
     depends_on:
-      - analytics-service
-      - automation-service
-      - ai-service
+      postgres:
+        condition: service_healthy
+      analytics-service:
+        condition: service_started
+      automation-service:
+        condition: service_started
+      ai-service:
+        condition: service_started
 
   analytics-service:
     container_name: ares-analytics
     build:
-      context: ./analytics-service 
+      context: ./analytics-service
+      args:
+        - JAR_FILE=target/*.jar
     restart: unless-stopped
+    env_file: .env
     ports:
-      - "8080:8080"
+      - "${ANALYTICS_SERVICE_PORT}:8080"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/ares_db
-      - SPRING_DATASOURCE_USERNAME=ares
-      - SPRING_DATASOURCE_PASSWORD=yoursecurepassword
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=${JPA_DDL_AUTO}
+      - SPRING_JPA_SHOW_SQL=${JPA_SHOW_SQL}
+      - LOGGING_LEVEL_ROOT=${LOG_LEVEL}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   automation-service:
     container_name: ares-automation
     build:
       context: ./automation-service
     restart: unless-stopped
+    env_file: .env
     ports:
-      - "8000:8000"
+      - "${AUTOMATION_SERVICE_PORT}:8000"
+    environment:
+      - PLAYWRIGHT_HEADLESS=${PLAYWRIGHT_HEADLESS}
+      - SCREENSHOT_DIR=${SCREENSHOT_DIR}
+      - MAX_PARALLEL_APPLICATIONS=${MAX_PARALLEL_APPLICATIONS}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE}
+      - RETRY_ATTEMPTS=${RETRY_ATTEMPTS}
+      - RETRY_DELAY=${RETRY_DELAY}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - USER_AGENT=${SCRAPING_USER_AGENT}
+    volumes:
+      - screenshots:/app/screenshots
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   ai-service:
     container_name: ares-ai
     build:
-      context: ./ai-service # Points to the Python app directory
+      context: ./ai-service
     restart: unless-stopped
+    env_file: .env
     ports:
-      - "8001:8001"
-
-volumes:
-  postgres_data:
+      - "${AI_SERVICE_PORT}:8001"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_MODEL=${AI_MODEL}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES}
+      - AI_TIMEOUT=${AI_TIMEOUT}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - 
