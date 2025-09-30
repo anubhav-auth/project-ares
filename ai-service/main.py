@@ -15,28 +15,7 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import time
 
-# Configuration
-class Settings:
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    ai_model: str = os.getenv("AI_MODEL", "gemini-pro")
-    ai_max_retries: int = int(os.getenv("AI_MAX_RETRIES", "3"))
-    ai_timeout: int = int(os.getenv("AI_TIMEOUT", "30"))
-    
-    redis_host: str = os.getenv("REDIS_HOST", "localhost")
-    redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
-    redis_password: Optional[str] = os.getenv("REDIS_PASSWORD")
-    
-    service_port: int = int(os.getenv("AI_SERVICE_PORT", "8001"))
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    debug_mode: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
-    
-    # CORS settings
-    cors_origins: str = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5678,http://localhost:3000")
-    
-    # Rate limiting
-    rate_limit_per_minute: int = int(os.getenv("AI_RATE_LIMIT", "30"))
-
-settings = Settings()
+from config import settings
 
 # Configure logging
 logging.basicConfig(
@@ -156,34 +135,20 @@ class AnswersRequest(BaseModel):
     strategy_dossier: Dict[str, Any]
     answer_style: Optional[str] = Field("concise", description="Answer style: concise, detailed, creative")
 
-# Lifecycle management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    logger.info("Starting AI service...")
-    
-    # Startup tasks
-    if model:
-        # Warm up the model with a test prompt
-        try:
-            test_response = model.generate_content("Test prompt")
-            logger.info("Model warmed up successfully")
-        except Exception as e:
-            logger.warning(f"Model warmup failed: {e}")
+    logger.info(f"Starting AI service on port {settings.service_port}")
+    logger.info(f"Debug mode: {settings.debug_mode}")
+    logger.info(f"Cache enabled: {settings.cache_enabled}")
     
     yield
     
-    # Shutdown tasks
     logger.info("Shutting down AI service...")
-    
-    # Save metrics to Redis before shutdown
     if redis_client:
-        try:
-            redis_client.set("ai_service_metrics", json.dumps(metrics))
-        except:
-            pass
+        redis_client.close()
 
-# FastAPI App with middleware
+# FastAPI App
 app = FastAPI(
     title="Project Ares - AI Core",
     description="AI service powered by Gemini",
@@ -195,7 +160,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
