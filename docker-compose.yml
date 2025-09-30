@@ -28,6 +28,8 @@ services:
       - ./config:/home/node/config 
     depends_on:
       - analytics-service
+      - automation-service
+      - ai-service
 
   analytics-service:
     container_name: ares-analytics
