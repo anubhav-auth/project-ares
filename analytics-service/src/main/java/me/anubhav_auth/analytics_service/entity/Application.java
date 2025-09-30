@@ -11,11 +11,17 @@ import java.time.Instant;
 
 @Entity
 @Data
-@Table(name = "applications") // Specifies the table name
+@Table(name = "applications",
+        indexes = {
+                @Index(name = "idx_job_id", columnList = "job_id"),
+                @Index(name = "idx_status", columnList = "status"),
+                @Index(name = "idx_company_name", columnList = "company_name"),
+                @Index(name = "idx_created_at", columnList = "created_at")
+        })
 public class Application {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY) // Auto-increments the ID
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "job_id", nullable = false, unique = true)
@@ -48,6 +54,28 @@ public class Application {
 
     @Column(name = "confirmation_screenshot_url")
     private String confirmationScreenshotUrl;
+
+    // New fields for better tracking
+    @Column(name = "application_url")
+    private String applicationUrl;
+
+    @Column(name = "salary_range")
+    private String salaryRange;
+
+    @Column(name = "location")
+    private String location;
+
+    @Column(name = "job_type")
+    private String jobType; // FULL_TIME, PART_TIME, CONTRACT, etc.
+
+    @Column(name = "experience_required")
+    private String experienceRequired;
+
+    @Column(name = "skills", columnDefinition = "TEXT")
+    private String skills;
+
+    @Column(name = "notes", columnDefinition = "TEXT")
+    private String notes;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
