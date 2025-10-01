@@ -2,7 +2,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator as validator
 from typing import Dict, Any, Optional, List
 import google.generativeai as genai
 import logging
@@ -310,6 +310,58 @@ class LLMService:
         )
 
 # ============= API ENDPOINTS =============
+
+@app.post("/api/check-similarity")
+async def check_similarity(request: SimilarityRequest):
+    """Check for duplicate jobs using semantic similarity with Gemini embeddings"""
+    
+    if not request.existing_job_descriptions:
+        return {"is_duplicate": False, "similarity_score": 0.0}
+    
+    # Use Gemini for semantic comparison
+    prompt = f"""
+    You are a job description analyzer. Compare these job descriptions for similarity.
+    
+    NEW JOB:
+    {request.new_job_description[:1000]}
+    
+    EXISTING JOBS:
+    {chr(10).join([f"Job {i+1}: {desc[:500]}" for i, desc in enumerate(request.existing_job_descriptions[:3])])}
+    
+    Analyze if the NEW JOB is essentially the same position as any existing job.
+    Consider:
+    1. Same role and responsibilities (even if worded differently)
+    2. Same company or department
+    3. Same requirements and qualifications
+    4. Same location and job type
+    
+    A similarity score > 0.85 means it's likely the same job.
+    
+    Respond in EXACT JSON format:
+    {{"is_duplicate": true/false, "similarity_score": 0.0-1.0, "most_similar_index": 0-based-index}}
+    """
+    
+    try:
+        response = await LLMService.generate_with_retry(prompt, cache_ttl=3600)
+        
+        # Parse JSON from response
+        import re
+        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+        else:
+            result = {"is_duplicate": False, "similarity_score": 0.0}
+        
+        # Validate threshold
+        if result.get("similarity_score", 0) > request.threshold:
+            result["is_duplicate"] = True
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Similarity check failed: {str(e)}")
+        # Fallback to simple comparison
+        return {"is_duplicate": False, "similarity_score": 0.0, "error": str(e)}
 
 @app.get("/")
 async def root():

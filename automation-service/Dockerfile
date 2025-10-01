@@ -18,10 +18,10 @@ COPY config.py .
 COPY main.py .
 
 # Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
+RUN chown -R pwuser:pwuser /app
 
-USER appuser
+# Switch to the existing non-root user
+USER pwuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
