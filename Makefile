@@ -11,34 +11,34 @@ help:
 	@echo "  make build     - Build all services"
 
 up:
-	docker-compose --env-file .env up -d
+	docker compose --env-file .env up -d
 
 down:
-	docker-compose down
+	docker compose down
 
 restart:
-	docker-compose down
-	docker-compose --env-file .env up -d
+	docker compose down
+	docker compose --env-file .env up -d
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 clean:
-	docker-compose down -v
+	docker compose down -v
 	rm -rf postgres_data redis_data n8n_data
 
 build:
-	docker-compose --env-file .env build --no-cache
+	docker compose --env-file .env build --no-cache
 
 # Service-specific commands
 analytics-logs:
-	docker-compose logs -f analytics-service
+	docker compose logs -f analytics-service
 
 ai-logs:
-	docker-compose logs -f ai-service
+	docker compose logs -f ai-service
 
 automation-logs:
-	docker-compose logs -f automation-service
+	docker compose logs -f automation-service
 
 db-shell:
 	docker exec -it ares-postgres psql -U ${POSTGRES_USER} -d ${POSTGRES_DB}
